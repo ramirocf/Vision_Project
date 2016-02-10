@@ -2,12 +2,6 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include "SDL/SDL.h"
-/*
- * A simple 'getting started' interface to the ARDrone, v0.2 
- * author: Tom Krajnik
- * The code is straightforward,
- * check out the CHeli class and main() to see 
- */
 #include <stdlib.h>
 #include "CHeli.h"
 #include <unistd.h>
@@ -20,27 +14,14 @@ using namespace cv;
 bool stop = false;
 CRawImage *image;
 CHeli *heli;
-float pitch, roll, yaw, height;
-int hover=0;
-// Joystick related
-SDL_Joystick* m_joystick;
-bool useJoystick;
-int joypadRoll, joypadPitch, joypadVerticalSpeed, joypadYaw;
-bool navigatedWithJoystick, joypadTakeOff, joypadLand, joypadHover;
-string ultimo = "init";
-
 int Px;
 int Py;
-int vR;
-int vG;
-int vB;
-// Here we will store points
-vector<Point> points;
-
+vector<Point> points; // Here we will store points
 Mat imagenClick;
-
-//Practice 1 : Flipped image matrix declaration and function definition
-Mat flippedImage;
+Mat flippedImage; //Flipped image matrix declaration and function definition
+//Histogram calculation variables
+vector<Mat> planes;
+Mat hist_plane1,hist_plane2,hist_plane3;
 
 //Flip function definition
 /*
@@ -61,8 +42,6 @@ void flipImageBasic(const Mat &sourceImage, Mat &destinationImage)
 			}
 }
 
-//End of prectice 1 : Flipped image declaration and function definition
-
 // Convert CRawImage to Mat
 void rawToMat( Mat &destImage, CRawImage* sourceImage)
 {	
@@ -76,7 +55,7 @@ void rawToMat( Mat &destImage, CRawImage* sourceImage)
 	}
 }
 
-//Practice 1: Mouse coordinate displaying function
+//Mouse coordinate displaying function
 void mouseCoordinatesPractice1Callback(int event, int x, int y, int flags, void* param)
 {
     switch (event)
@@ -93,183 +72,121 @@ void mouseCoordinatesPractice1Callback(int event, int x, int y, int flags, void*
             break;
     }
 }
-//End of practice 1: Mouse coordinate displaying function
 
-//codigo del click en pantalla
-void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* param)
-{
-    uchar* destination;
-    switch (event)
-    {
-        case CV_EVENT_LBUTTONDOWN:
-            Px=x;
-            Py=y;
-            destination = (uchar*) imagenClick.ptr<uchar>(Py);
-            vB=destination[Px * 3];
-            vG=destination[Px*3+1];
-            vR=destination[Px*3+2];
-            break;
-        case CV_EVENT_MOUSEMOVE:
-            break;
-        case CV_EVENT_LBUTTONUP:
-            break;
-        case CV_EVENT_RBUTTONDOWN:
-        //flag=!flag;
-            break;
-        
-    }
-}
+
 
 int main(int argc,char* argv[])
 {
-	//establishing connection with the quadcopter
-	heli = new CHeli();
-	
-	//this class holds the image from the drone	
-	image = new CRawImage(320,240);
-	
-	// Initial values for control	
-    pitch = roll = yaw = height = 0.0;
-    joypadPitch = joypadRoll = joypadYaw = joypadVerticalSpeed = 0.0;
+  //Histogram variables
+  int histSize = 256;
+  float range [] = {0,256};
+  const float*  histRange = {range};
+  bool uniform = true;
+  bool accumulate = false;
+  int hist_w = 512; int hist_h = 400;
+  int bin_w = cvRound( (double) hist_w/histSize );
+  Mat histImage1(hist_h,hist_w,CV_8UC3,Scalar(0,0,0));
+  Mat histImage2(hist_h,hist_w,CV_8UC3,Scalar(0,0,0));
+  Mat histImage3(hist_h,hist_w,CV_8UC3,Scalar(0,0,0));
+  namedWindow("Histogram1", CV_WINDOW_AUTOSIZE);
+  namedWindow("Histogram2", CV_WINDOW_AUTOSIZE);
+  namedWindow("Histogram3", CV_WINDOW_AUTOSIZE);
 
-	// Destination OpenCV Mat	
-	Mat currentImage = Mat(240, 320, CV_8UC3);
-	// Show it	
-	imshow("ParrotCam", currentImage);
+  //establishing connection with the quadcopter
+  heli = new CHeli(); 
+	
+  //this class holds the image from the drone	
+  image = new CRawImage(320,240);
 
-    // Initialize joystick
-    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
-    useJoystick = SDL_NumJoysticks() > 0;
-    if (useJoystick)
-    {
-        SDL_JoystickClose(m_joystick);
-        m_joystick = SDL_JoystickOpen(0);
+  // Destination OpenCV Mat	
+  Mat currentImage = Mat(240, 320, CV_8UC3);
+
+  setMouseCallback("Click",mouseCoordinatesPractice1Callback);  
+
+  //Windows to show working images	
+  imshow("ParrotCam", currentImage);
+  namedWindow("Click");
+  namedWindow("Flipped");
+
+  while(stop == false){
+    // Clear the console
+    printf("\033[2J\033[1;1H");
+    cout<<"Pos X: "<<Px<<" Pos Y: "<<Py<<endl;
+   
+    //Clear histograms
+    histImage1 = Scalar(0,0,0);
+    histImage2 = Scalar(0,0,0);
+    histImage3 = Scalar(0,0,0);		
+	
+    //image is captured
+    heli->renewImage(image);
+
+    // Copy to OpenCV Mat
+    rawToMat(currentImage, image);
+    imshow("ParrotCam", currentImage);
+
+    //Image flipping
+    flipImageBasic(currentImage,flippedImage);
+    imshow("Flipped",flippedImage);
+
+    //Line drawing
+    imagenClick=currentImage;
+    //cout << "Points size: " << points.size()<< endl;
+    if(points.size() > 1){
+      circle(imagenClick, (Point)points[0], 5, Scalar( 0,0,255), CV_FILLED);                    
+      for(int i = 0; i < (int)(points.size()-1); i++){
+        line(imagenClick,
+            (Point)points[i],
+            (Point)points[i+1],
+	    Scalar( 0,0,255));
+      }
     }
+    else if (points.size() == 1){
+      circle(imagenClick, (Point)points[0], 5, Scalar( 0,0,255), CV_FILLED);
+    }
+    //figure showing
+    imshow("Click", imagenClick);
 
-    //
-    namedWindow("Click");
-    //setMouseCallback("Click", mouseCoordinatesExampleCallback);
-    //Practice 1: Select function that displays coordinates of mouse
-    setMouseCallback("Click",mouseCoordinatesPractice1Callback);
-    //End of practice1: Function for displaying coordinates
-    //Practice 1: Window declaration for fliped image
-    namedWindow("Flipped");
-    //End of practice 1: Window declaration for flipped image
-    while (stop == false)
+    //Histogram calculation
+    split( currentImage, planes );
+    calcHist(&planes[0],1,0,Mat(),hist_plane1,1,&histSize,&histRange,uniform,accumulate);
+    calcHist(&planes[1],1,0,Mat(),hist_plane2,1,&histSize,&histRange,uniform,accumulate);
+    calcHist(&planes[2],1,0,Mat(),hist_plane3,1,&histSize,&histRange,uniform,accumulate);
+
+    //Normalize histograms
+    normalize(hist_plane1,hist_plane1,0,histImage1.rows,NORM_MINMAX,-1,Mat());
+    normalize(hist_plane2,hist_plane2,0,histImage2.rows,NORM_MINMAX,-1,Mat());
+    normalize(hist_plane3,hist_plane3,0,histImage3.rows,NORM_MINMAX,-1,Mat());
+
+    //Draw for each channel
+    for( int i = 1; i < histSize; i++ )
     {
+      line( histImage1, Point( bin_w*(i-1), hist_h - cvRound(hist_plane1.at<float>(i-1)) ) ,
+                       Point( bin_w*(i), hist_h - cvRound(hist_plane1.at<float>(i)) ),
+                       Scalar( 255, 0, 0), 2, 8, 0  );
+      line( histImage2, Point( bin_w*(i-1), hist_h - cvRound(hist_plane2.at<float>(i-1)) ) ,
+                       Point( bin_w*(i), hist_h - cvRound(hist_plane2.at<float>(i)) ),
+                       Scalar( 0, 255, 0), 2, 8, 0  );
+      line( histImage3, Point( bin_w*(i-1), hist_h - cvRound(hist_plane3.at<float>(i-1)) ) ,
+                       Point( bin_w*(i), hist_h - cvRound(hist_plane3.at<float>(i)) ),
+                       Scalar( 0, 0, 255), 2, 8, 0  );
+    }   
 
-        // Clear the console
-        printf("\033[2J\033[1;1H");
+    //Display histograms
+    imshow("Histogram1", histImage1);
+    imshow("Histogram2", histImage2);
+    imshow("Histogram3", histImage3);
 
-        if (useJoystick)
-        {
-            SDL_Event event;
-            SDL_PollEvent(&event);
+	  char key = waitKey(5);
+	  switch (key) {
+	    case 27: stop = true; break;
+	    default: ;
+	  }
 
-            joypadRoll = SDL_JoystickGetAxis(m_joystick, 2);
-            joypadPitch = SDL_JoystickGetAxis(m_joystick, 3);
-            joypadVerticalSpeed = SDL_JoystickGetAxis(m_joystick, 1);
-            joypadYaw = SDL_JoystickGetAxis(m_joystick, 0);
-            joypadTakeOff = SDL_JoystickGetButton(m_joystick, 1);
-            joypadLand = SDL_JoystickGetButton(m_joystick, 2);
-            joypadHover = SDL_JoystickGetButton(m_joystick, 0);
-        }
-
-        // prints the drone telemetric data, helidata struct contains drone angles, speeds and battery status
-        printf("===================== Parrot Basic Example =====================\n\n");
-        fprintf(stdout, "Angles  : %.2lf %.2lf %.2lf \n", helidata.phi, helidata.psi, helidata.theta);
-        fprintf(stdout, "Speeds  : %.2lf %.2lf %.2lf \n", helidata.vx, helidata.vy, helidata.vz);
-        fprintf(stdout, "Battery : %.0lf \n", helidata.battery);
-        fprintf(stdout, "Hover   : %d \n", hover);
-        fprintf(stdout, "Joypad  : %d \n", useJoystick ? 1 : 0);
-        fprintf(stdout, "  Roll    : %d \n", joypadRoll);
-        fprintf(stdout, "  Pitch   : %d \n", joypadPitch);
-        fprintf(stdout, "  Yaw     : %d \n", joypadYaw);
-        fprintf(stdout, "  V.S.    : %d \n", joypadVerticalSpeed);
-        fprintf(stdout, "  TakeOff : %d \n", joypadTakeOff);
-        fprintf(stdout, "  Land    : %d \n", joypadLand);
-        fprintf(stdout, "Navigating with Joystick: %d \n", navigatedWithJoystick ? 1 : 0);
-        cout<<"Pos X: "<<Px<<" Pos Y: "<<Py<<" Valor RGB: ("<<vR<<","<<vG<<","<<vB<<")"<<endl;
-        
-	   cout<<"Prueba Luis"<<endl;
+	  usleep(15000);
+  }
 	
-		//image is captured
-		heli->renewImage(image);
-
-		// Copy to OpenCV Mat
-		rawToMat(currentImage, image);
-		imshow("ParrotCam", currentImage);
-
-                //Practice 1: Image flipping and showing
-                flipImageBasic(currentImage,flippedImage);
-                imshow("Flipped",flippedImage);
-                //End of practice 1: Image flipping and showing
-
-                //Practice 1: Line drawing
-                imagenClick=currentImage;
-                cout << "Points size: " << points.size()<< endl;
-                if(points.size() > 1){
-                    circle(imagenClick, (Point)points[0], 5, Scalar( 0,0,255), CV_FILLED);                    
-                    for(int i = 0; i < (points.size()-1); i++){
-                    line(imagenClick,
-                         (Point)points[i],
-                         (Point)points[i+1],
-                         Scalar( 0,0,255));
-                    }
-                }
-                else if (points.size() == 1){
-                  circle(imagenClick, (Point)points[0], 5, Scalar( 0,0,255), CV_FILLED);
-                }
-                //figure showing
-                imshow("Click", imagenClick);
-                //End of practice 1: Line Drawing
-
-        char key = waitKey(5);
-		switch (key) {
-			case 'a': yaw = -20000.0; break;
-			case 'd': yaw = 20000.0; break;
-			case 'w': height = -20000.0; break;
-			case 's': height = 20000.0; break;
-			case 'q': heli->takeoff(); break;
-			case 'e': heli->land(); break;
-			case 'z': heli->switchCamera(0); break;
-			case 'x': heli->switchCamera(1); break;
-			case 'c': heli->switchCamera(2); break;
-			case 'v': heli->switchCamera(3); break;
-			case 'j': roll = -20000.0; break;
-			case 'l': roll = 20000.0; break;
-			case 'i': pitch = -20000.0; break;
-			case 'k': pitch = 20000.0; break;
-            case 'h': hover = (hover + 1) % 2; break;
-            case 27: stop = true; break;
-            default: pitch = roll = yaw = height = 0.0;
-		}
-
-        if (joypadTakeOff) {
-            heli->takeoff();
-        }
-        if (joypadLand) {
-            heli->land();
-        }
-        //hover = joypadHover ? 1 : 0;
-
-        //setting the drone angles
-        if (joypadRoll != 0 || joypadPitch != 0 || joypadVerticalSpeed != 0 || joypadYaw != 0)
-        {
-            heli->setAngles(joypadPitch, joypadRoll, joypadYaw, joypadVerticalSpeed, hover);
-            navigatedWithJoystick = true;
-        }
-        else
-        {
-            heli->setAngles(pitch, roll, yaw, height, hover);
-            navigatedWithJoystick = false;
-        }
-
-        usleep(15000);
-	}
-	
-	heli->land();
-    SDL_JoystickClose(m_joystick);
+    heli->land();
     delete heli;
 	delete image;
 	return 0;
