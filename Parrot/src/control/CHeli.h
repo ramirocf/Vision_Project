@@ -9,6 +9,9 @@
 #include "stdio.h"
 #include "CRawImage.h" 
 
+#ifndef HELI_H
+#define HELI_H
+
 typedef struct{
 	int axis[6];
 	bool buttons[11];
@@ -45,3 +48,4 @@ private:
 	int imageWidth,imageHeight;
 };
 
+#endif // HELI_H
